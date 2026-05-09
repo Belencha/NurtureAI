@@ -15,7 +15,8 @@ import {
   Trash2,
   Dumbbell,
   CheckCircle2,
-  Scale
+  Scale,
+  Palette
 } from 'lucide-react';
 import { analyzeDietPDF, analyzeFood, getNutritionAdvice, analyzeInBodyPDF } from './services/geminiService';
 import { Diet, FoodLog, DailySummary, ExerciseLog, InBodyReport } from './types';
@@ -50,6 +51,12 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isAnalyzingPDF, setIsAnalyzingPDF] = useState(false);
   const [advice, setAdvice] = useState<string>("");
+  const [theme, setTheme] = useState(() => localStorage.getItem('nurture_theme') || 'organic');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('nurture_theme', theme);
+  }, [theme]);
 
   // Load data from server
   useEffect(() => {
@@ -605,6 +612,32 @@ export default function App() {
                           </div>
                           <span className="text-[10px] text-brand-clay font-medium">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-8 pb-12">
+                    <h4 className="serif text-lg mb-4 text-brand-olive flex items-center gap-2">
+                       <Palette size={18} /> App Appearance
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { id: 'organic', name: 'Organic', color: '#6B705C' },
+                        { id: 'midnight', name: 'Midnight', color: '#00D1FF' },
+                        { id: 'wellness', name: 'Wellness', color: '#E07A5F' },
+                        { id: 'nordic', name: 'Nordic', color: '#475569' }
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => setTheme(t.id)}
+                          className={`
+                            p-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-2
+                            ${theme === t.id ? 'border-brand-olive bg-brand-olive/10' : 'border-brand-clay/10 bg-brand-white'}
+                          `}
+                        >
+                          <div className="w-5 h-5 rounded-full border border-black/5" style={{ backgroundColor: t.color }} />
+                          <span className="text-[10px] font-bold uppercase tracking-widest">{t.name}</span>
+                        </button>
                       ))}
                     </div>
                   </div>

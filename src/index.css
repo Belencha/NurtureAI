@@ -6,12 +6,48 @@
   --font-serif: "Cormorant Garamond", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-brand-bg: #FDFBF7;
-  --color-brand-olive: #6B705C;
-  --color-brand-clay: #B7B7A4;
-  --color-brand-sand: #DDBEA9;
-  --color-brand-ink: #2B2D24;
-  --color-brand-white: #FFFFFF;
+  --color-brand-bg: var(--brand-bg);
+  --color-brand-olive: var(--brand-olive);
+  --color-brand-clay: var(--brand-clay);
+  --color-brand-sand: var(--brand-sand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-white: var(--brand-white);
+}
+
+:root {
+  --brand-bg: #FDFBF7;
+  --brand-olive: #6B705C;
+  --brand-clay: #B7B7A4;
+  --brand-sand: #DDBEA9;
+  --brand-ink: #2B2D24;
+  --brand-white: #FFFFFF;
+}
+
+[data-theme='midnight'] {
+  --brand-bg: #0A0A0B;
+  --brand-olive: #00D1FF;
+  --brand-clay: #3F3F46;
+  --brand-sand: #71717A;
+  --brand-ink: #FFFFFF;
+  --brand-white: #18181B;
+}
+
+[data-theme='wellness'] {
+  --brand-bg: #FFF9F5;
+  --brand-olive: #E07A5F;
+  --brand-clay: #F2CC8F;
+  --brand-sand: #81B29A;
+  --brand-ink: #3D405B;
+  --brand-white: #FFFFFF;
+}
+
+[data-theme='nordic'] {
+  --brand-bg: #F8FAFC;
+  --brand-olive: #475569;
+  --brand-clay: #94A3B8;
+  --brand-sand: #CBD5E1;
+  --brand-ink: #0F172A;
+  --brand-white: #FFFFFF;
 }
 
 @layer base {
