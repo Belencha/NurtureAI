@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // User Profile
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfile(request.resource.data) 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL']);
+      
+      function isValidUserProfile(data) {
+        return data.keys().hasAll(['uid', 'email', 'createdAt']) 
+               && data.uid == request.auth.uid 
+               && data.email is string 
+               && (data.createdAt == request.time || data.createdAt is number);
+      }
+
+      // Diets
+      match /diets/{dietId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidDiet(request.resource.data);
+        allow delete: if isOwner(userId);
+
+        function isValidDiet(data) {
+          return data.keys().hasAll(['userId', 'content', 'createdAt'])
+                 && data.userId == userId
+                 && data.content is string;
+        }
+      }
+
+      // Food Logs
+      match /logs/{logId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidLog(request.resource.data);
+        allow delete: if isOwner(userId);
+
+        function isValidLog(data) {
+          return data.keys().hasAll(['userId', 'name', 'calories', 'timestamp'])
+                 && data.userId == userId
+                 && data.name is string
+                 && data.calories is number;
+        }
+      }
+
+      // Exercise Logs
+      match /exerciseLogs/{logId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidExercise(request.resource.data);
+        allow delete: if isOwner(userId);
+
+        function isValidExercise(data) {
+          return data.keys().hasAll(['userId', 'type', 'date', 'timestamp'])
+                 && data.userId == userId
+                 && data.type is string
+                 && data.date is string;
+        }
+      }
+
+      // InBody Reports
+      match /inBodyReports/{reportId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidReport(request.resource.data);
+        allow delete: if isOwner(userId);
+
+        function isValidReport(data) {
+          return data.keys().hasAll(['userId', 'date', 'weight', 'createdAt'])
+                 && data.userId == userId
+                 && data.date is string
+                 && data.weight is number;
+        }
+      }
+    }
+  }
+}

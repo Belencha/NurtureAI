@@ -16,10 +16,27 @@ import {
   Dumbbell,
   CheckCircle2,
   Scale,
-  Palette
+  Palette,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { analyzeDietPDF, analyzeFood, getNutritionAdvice, analyzeInBodyPDF } from './services/geminiService';
 import { Diet, FoodLog, DailySummary, ExerciseLog, InBodyReport } from './types';
+import { useAuth } from './contexts/AuthContext';
+import { 
+  logout, 
+  saveDiet, 
+  saveFoodLog, 
+  deleteDietFromDb, 
+  saveExerciseLogDb, 
+  deleteExerciseLogDb,
+  saveInBodyReportDb,
+  subscribeToDiets,
+  subscribeToLogs,
+  subscribeToExerciseLogs,
+  subscribeToInBodyReports
+} from './services/firebase';
+import LoginPage from './components/LoginPage';
 
 // Components
 const Card = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
@@ -42,6 +59,7 @@ const ProgressBar = ({ current, target, color = "bg-brand-olive" }: { current: n
 };
 
 export default function App() {
+  const { user, loading: authLoading } = useAuth();
   const [diets, setDiets] = useState<Diet[]>([]);
   const [logs, setLogs] = useState<FoodLog[]>([]);
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
@@ -58,29 +76,36 @@ export default function App() {
     localStorage.setItem('nurture_theme', theme);
   }, [theme]);
 
-  // Load data from server
+  // Real-time data sync with Firebase
   useEffect(() => {
-    fetch('/api/data')
-      .then(res => res.json())
-      .then(data => {
-        setDiets(data.diets || []);
-        setLogs(data.logs || []);
-        setExerciseLogs(data.exerciseLogs || []);
-        setInBodyReports(data.inBodyReports || []);
-        if (data.diets?.length > 0) {
-          setSelectedDietId(data.diets[data.diets.length - 1].id);
-        }
-      });
-  }, []);
+    if (!user) return;
 
-  // Save data to server
-  const saveData = async (newDiets: Diet[], newLogs: FoodLog[], newExLogs: ExerciseLog[] = exerciseLogs, newInBody: InBodyReport[] = inBodyReports) => {
-    await fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ diets: newDiets, logs: newLogs, exerciseLogs: newExLogs, inBodyReports: newInBody })
+    const unsubDiets = subscribeToDiets(user.uid, (data) => {
+      const sorted = (data as Diet[]).sort(dietSortFn);
+      setDiets(sorted);
     });
-  };
+
+    const unsubLogs = subscribeToLogs(user.uid, (data) => setLogs(data as FoodLog[]));
+    const unsubEx = subscribeToExerciseLogs(user.uid, (data) => setExerciseLogs(data as ExerciseLog[]));
+    const unsubInBody = subscribeToInBodyReports(user.uid, (data) => setInBodyReports(data as InBodyReport[]));
+
+    return () => {
+      unsubDiets();
+      unsubLogs();
+      unsubEx();
+      unsubInBody();
+    };
+  }, [user]);
+
+  // Handle initial diet selection safely
+  useEffect(() => {
+    if (diets.length > 0 && !selectedDietId) {
+      setSelectedDietId(diets[0].id);
+    }
+  }, [diets, selectedDietId]);
+
+  // Save data functions are now obsolete as we save directly to Firestore per action
+  const saveData = async () => {};
 
   const dietSortFn = (a: Diet, b: Diet) => {
     const yearA = a.year || new Date(a.createdAt).getFullYear();
@@ -162,10 +187,10 @@ export default function App() {
             createdAt: Date.now()
           };
 
-          const updatedDiets = [...diets, newDiet];
-          setDiets(updatedDiets);
-          setSelectedDietId(newDiet.id);
-          saveData(updatedDiets, logs, exerciseLogs);
+          if (user) {
+            await saveDiet(user.uid, newDiet);
+            setSelectedDietId(newDiet.id);
+          }
         } catch (err) {
           console.error(err);
         } finally {
@@ -182,12 +207,12 @@ export default function App() {
   const handleDeleteDiet = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    const updatedDiets = diets.filter(d => d.id !== id);
-    setDiets(updatedDiets);
-    if (selectedDietId === id) {
-      setSelectedDietId(updatedDiets.length > 0 ? updatedDiets[updatedDiets.length - 1].id : null);
+    if (user) {
+      await deleteDietFromDb(user.uid, id);
+      if (selectedDietId === id) {
+        setSelectedDietId(null);
+      }
     }
-    saveData(updatedDiets, logs, exerciseLogs);
   };
 
   const handleLogFood = async (foodDesc: string) => {
@@ -206,10 +231,10 @@ export default function App() {
         }
       };
 
-      const updatedLogs = [...logs, newLog];
-      setLogs(updatedLogs);
-      saveData(diets, updatedLogs, exerciseLogs);
-      setActiveTab('dash');
+      if (user) {
+        await saveFoodLog(user.uid, newLog);
+        setActiveTab('dash');
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -217,11 +242,12 @@ export default function App() {
     }
   };
 
-  const handleLogExercise = (date: string) => {
+  const handleLogExercise = async (date: string) => {
+    if (!user) return;
+    
     const existing = exerciseLogs.find(l => l.date === date);
-    let updatedExLogs;
     if (existing) {
-      updatedExLogs = exerciseLogs.filter(l => l.date !== date);
+      await deleteExerciseLogDb(user.uid, existing.id);
     } else {
       const newEx: ExerciseLog = {
         id: Math.random().toString(36).substr(2, 9),
@@ -229,10 +255,8 @@ export default function App() {
         type: 'CrossFit',
         timestamp: Date.now()
       };
-      updatedExLogs = [...exerciseLogs, newEx];
+      await saveExerciseLogDb(user.uid, newEx);
     }
-    setExerciseLogs(updatedExLogs);
-    saveData(diets, logs, updatedExLogs);
   };
   
   const handleInBodyUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -258,10 +282,10 @@ export default function App() {
             createdAt: Date.now()
           };
 
-          const updatedReports = [...inBodyReports, newReport].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setInBodyReports(updatedReports);
-          saveData(diets, logs, exerciseLogs, updatedReports);
-          setActiveTab('metrics');
+          if (user) {
+            await saveInBodyReportDb(user.uid, newReport);
+            setActiveTab('metrics');
+          }
         } catch (err) {
           console.error(err);
         } finally {
@@ -377,6 +401,22 @@ export default function App() {
   };
 
   const exerciseStats = getExerciseTendency();
+
+  if (authLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-brand-bg">
+        <motion.div 
+          animate={{ rotate: 360 }} 
+          transition={{ repeat: Infinity, duration: 1, ease: "linear" }} 
+          className="w-10 h-10 border-4 border-brand-olive border-t-transparent rounded-full" 
+        />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto relative bg-brand-bg shadow-2xl overflow-hidden border-x border-brand-clay/10 font-sans text-brand-ink">
@@ -617,6 +657,33 @@ export default function App() {
                   </div>
 
                   <div className="pt-8 pb-12">
+                    <h4 className="serif text-lg mb-4 text-brand-olive flex items-center gap-2">
+                       <UserIcon size={18} /> User Account
+                    </h4>
+                    <div className="p-4 bg-brand-white rounded-2xl border border-brand-clay/10">
+                      <div className="flex items-center gap-4 mb-6">
+                        {user.photoURL ? (
+                          <img src={user.photoURL} alt={user.displayName || 'User'} className="w-12 h-12 rounded-full" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-full bg-brand-olive/10 flex items-center justify-center text-brand-olive">
+                            <UserIcon size={24} />
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-bold text-brand-ink">{user.displayName || 'Anonymous'}</p>
+                          <p className="text-[10px] text-brand-clay uppercase tracking-widest">{user.email}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => logout()}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-red-50 text-red-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-red-100 transition-colors"
+                      >
+                        <LogOut size={16} /> Sign Out
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 pb-12">
                     <h4 className="serif text-lg mb-4 text-brand-olive flex items-center gap-2">
                        <Palette size={18} /> App Appearance
                     </h4>

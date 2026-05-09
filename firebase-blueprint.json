@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Public and private user information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Diet": {
+      "title": "Diet Plan",
+      "description": "Analyzed diet from PDF or manual input",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "enum": ["doctor", "personal", "ai"] },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "FoodLog": {
+      "title": "Food Entry",
+      "description": "Individual food entry for a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "protein": { "type": "number" },
+        "carbs": { "type": "number" },
+        "fat": { "type": "number" },
+        "calories": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{userId}/diets/{dietId}": {
+      "schema": "Diet",
+      "description": "User's diet plans"
+    },
+    "/users/{userId}/logs/{logId}": {
+      "schema": "FoodLog",
+      "description": "User's food logs"
+    },
+    "/users/{userId}/exerciseLogs/{logId}": {
+      "schema": "ExerciseLog",
+      "description": "User's exercise logs"
+    },
+    "/users/{userId}/inBodyReports/{reportId}": {
+      "schema": "InBodyReport",
+      "description": "User's InBody reports"
+    }
+  }
+}

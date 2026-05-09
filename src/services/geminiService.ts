@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export async function analyzeDietPDF(base64Data: string, fileName?: string) {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Analyze this nutrition diet PDF comprehensively. 
     1. Extract or ESTIMATE the primary daily nutritional targets:
@@ -68,7 +68,7 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
 }
 
 export async function analyzeInBodyPDF(base64Data: string) {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Analyze this InBody body composition report PDF.
     Extract the following metrics:
@@ -121,7 +121,7 @@ export async function analyzeInBodyPDF(base64Data: string) {
 }
 
 export async function analyzeFood(foodDescription: string) {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Analyze this food description: "${foodDescription}". 
     Estimate the nutritional values: protein, carbs, fat, and calories.
@@ -155,7 +155,7 @@ export async function getNutritionAdvice(
   dietSummary: string,
   userQuestion: string
 ) {
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash";
   const prompt = `
     Current Intake Today: ${JSON.stringify(currentIntake)}
     Target Intake: ${JSON.stringify(targetIntake)}
