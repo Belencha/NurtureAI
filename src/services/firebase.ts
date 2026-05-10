@@ -171,6 +171,19 @@ export const getFoodLogs = async (userId: string) => {
   }
 };
 
+export const deleteFoodLogFromDb = async (userId: string, logId: string) => {
+  if (!isConfigured) {
+    mockDb.delete(userId, 'logs', logId);
+    return;
+  }
+  try {
+    const logRef = doc(db, 'users', userId, 'logs', logId);
+    await deleteDoc(logRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `users/${userId}/logs/${logId}`);
+  }
+};
+
 // Listeners for real-time updates
 export const subscribeToDiets = (userId: string, callback: (diets: any[]) => void) => {
   if (!isConfigured) return mockDb.subscribe(userId, 'diets', callback);
@@ -234,6 +247,19 @@ export const saveInBodyReportDb = async (userId: string, report: any) => {
     await setDoc(reportRef, { ...report, userId, updatedAt: serverTimestamp() });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `users/${userId}/inBodyReports/${report.id}`);
+  }
+};
+
+export const deleteInBodyReportDb = async (userId: string, reportId: string) => {
+  if (!isConfigured) {
+    mockDb.delete(userId, 'inBodyReports', reportId);
+    return;
+  }
+  try {
+    const reportRef = doc(db, 'users', userId, 'inBodyReports', reportId);
+    await deleteDoc(reportRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `users/${userId}/inBodyReports/${reportId}`);
   }
 };
 

@@ -124,8 +124,11 @@ export async function analyzeFood(foodDescription: string) {
   const model = "gemini-2.0-flash";
   const prompt = `
     Analyze this food description: "${foodDescription}". 
-    Estimate the nutritional values: protein, carbs, fat, and calories.
-    Format as JSON.
+    Estimate the nutritional values in grams: protein, carbs, and fat.
+    Calculate the total calories (kcal) using these estimates (approx 4 kcal/g for protein and carbs, 9 kcal/g for fat).
+    
+    IMPORTANT: NEVER return 0 for calories if there is any protein, carbs, or fat.
+    Return a foodName and the nutrients as a clear JSON object.
   `;
 
   const response = await ai.models.generateContent({
@@ -141,7 +144,8 @@ export async function analyzeFood(foodDescription: string) {
           carbs: { type: Type.NUMBER },
           fat: { type: Type.NUMBER },
           calories: { type: Type.NUMBER }
-        }
+        },
+        required: ["foodName", "protein", "carbs", "fat", "calories"]
       }
     }
   });

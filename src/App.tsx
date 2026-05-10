@@ -28,9 +28,11 @@ import {
   saveDiet, 
   saveFoodLog, 
   deleteDietFromDb, 
+  deleteFoodLogFromDb,
   saveExerciseLogDb, 
   deleteExerciseLogDb,
   saveInBodyReportDb,
+  deleteInBodyReportDb,
   subscribeToDiets,
   subscribeToLogs,
   subscribeToExerciseLogs,
@@ -46,7 +48,7 @@ const Card = ({ children, className = "" }: { children: React.ReactNode, classNa
 );
 
 const ProgressBar = ({ current, target, color = "bg-brand-olive" }: { current: number, target: number, color?: string }) => {
-  const percent = Math.min(100, (current / target) * 100);
+  const percent = target > 0 ? Math.min(100, (current / target) * 100) : 0;
   return (
     <div className="w-full bg-brand-bg h-1.5 rounded-full overflow-hidden">
       <motion.div 
@@ -119,6 +121,24 @@ export default function App() {
     return b.createdAt - a.createdAt;
   };
 
+  const handleDeleteLog = async (id: string) => {
+    if (user) {
+      await deleteFoodLogFromDb(user.uid, id);
+    }
+  };
+
+  const handleDeleteExercise = async (id: string) => {
+    if (user) {
+      await deleteExerciseLogDb(user.uid, id);
+    }
+  };
+
+  const handleDeleteReport = async (id: string) => {
+    if (user) {
+      await deleteInBodyReportDb(user.uid, id);
+    }
+  };
+
   const currentDiet = diets.find(d => d.id === selectedDietId) || 
     [...diets].sort(dietSortFn)[0];
 
@@ -126,14 +146,25 @@ export default function App() {
 
   const getTodayStats = () => {
     const today = new Date().toDateString();
-    const todayLogs = logs.filter(l => new Date(l.timestamp).toDateString() === today);
-    
-    return todayLogs.reduce((acc, log) => ({
-      protein: acc.protein + log.nutrients.protein,
-      carbs: acc.carbs + log.nutrients.carbs,
-      fat: acc.fat + log.nutrients.fat,
-      calories: acc.calories + log.nutrients.calories,
-    }), { protein: 0, carbs: 0, fat: 0, calories: 0 });
+    const stats = logs.reduce((acc, log) => {
+      const logDate = log.timestamp ? new Date(log.timestamp).toDateString() : null;
+      if (logDate === today) {
+        return {
+          protein: acc.protein + (Number(log.nutrients?.protein) || 0),
+          carbs: acc.carbs + (Number(log.nutrients?.carbs) || 0),
+          fat: acc.fat + (Number(log.nutrients?.fat) || 0),
+          calories: acc.calories + (Number(log.nutrients?.calories) || 0),
+        };
+      }
+      return acc;
+    }, { protein: 0, carbs: 0, fat: 0, calories: 0 });
+
+    return {
+      protein: Math.round(stats.protein),
+      carbs: Math.round(stats.carbs),
+      fat: Math.round(stats.fat),
+      calories: Math.round(stats.calories),
+    };
   };
 
   const todayStats = getTodayStats();
@@ -150,15 +181,22 @@ export default function App() {
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
     
-    const monthLogs = logs.filter(l => {
-      const d = new Date(l.timestamp);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
+    const stats = logs.reduce((acc, log) => {
+      if (!log.timestamp) return acc;
+      const d = new Date(log.timestamp);
+      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        return {
+          protein: acc.protein + (Number(log.nutrients?.protein) || 0),
+          calories: acc.calories + (Number(log.nutrients?.calories) || 0),
+        };
+      }
+      return acc;
+    }, { protein: 0, calories: 0 });
 
-    return monthLogs.reduce((acc, log) => ({
-      protein: acc.protein + log.nutrients.protein,
-      calories: acc.calories + log.nutrients.calories,
-    }), { protein: 0, calories: 0 });
+    return {
+      protein: Math.round(stats.protein),
+      calories: Math.round(stats.calories),
+    };
   };
 
   const monthProgress = getMonthProgress();
@@ -219,15 +257,26 @@ export default function App() {
     setIsLoading(true);
     try {
       const result = await analyzeFood(foodDesc);
+      
+      // Fallback calculation if calories are missing or 0 but macros exist
+      let calories = Number(result.calories) || 0;
+      const protein = Number(result.protein) || 0;
+      const carbs = Number(result.carbs) || 0;
+      const fat = Number(result.fat) || 0;
+      
+      if (calories <= 0 && (protein > 0 || carbs > 0 || fat > 0)) {
+        calories = (protein * 4) + (carbs * 4) + (fat * 9);
+      }
+
       const newLog: FoodLog = {
         id: Math.random().toString(36).substr(2, 9),
         timestamp: Date.now(),
         foodName: result.foodName,
         nutrients: {
-          protein: result.protein,
-          carbs: result.carbs,
-          fat: result.fat,
-          calories: result.calories
+          protein,
+          carbs,
+          fat,
+          calories
         }
       };
 
@@ -514,7 +563,11 @@ export default function App() {
                       </div>
                       <ProgressBar current={todayStats.calories} target={currentDiet.nutritionalGoals.calories} />
                       <div className="flex justify-between mt-3">
-                        <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">{Math.round((todayStats.calories/currentDiet.nutritionalGoals.calories)*100)}% of target</p>
+                        <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">
+                          {currentDiet.nutritionalGoals.calories > 0 
+                            ? Math.round((todayStats.calories/currentDiet.nutritionalGoals.calories)*100) 
+                            : 0}% of target
+                        </p>
                         <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">Goal: {currentDiet.nutritionalGoals.calories}</p>
                       </div>
                     </Card>
@@ -556,7 +609,7 @@ export default function App() {
                       <div>
                         <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest mb-2">
                           <span className="opacity-60">Protein Accumulation</span>
-                          <span className="text-brand-sand">{monthStats.protein} / {currentDiet.nutritionalGoals.protein * monthProgress.totalDays}g</span>
+                          <span className="text-brand-sand">{Math.round(monthStats.protein)} / {Math.round(currentDiet.nutritionalGoals.protein * monthProgress.totalDays)}g</span>
                         </div>
                         <div className="h-1.5 w-full bg-brand-white/10 rounded-full overflow-hidden">
                           <motion.div 
@@ -642,17 +695,47 @@ export default function App() {
                        Recent Logs
                     </h3>
                     <div className="space-y-3">
-                      {logs.filter(l => new Date(l.timestamp).toDateString() === new Date().toDateString()).map(log => (
-                        <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10 hover:border-brand-olive/20 transition-colors">
-                          <div>
-                            <p className="font-semibold text-sm text-brand-ink">{log.foodName}</p>
-                            <p className="text-[10px] text-brand-clay uppercase font-bold tracking-wider mt-0.5">
-                              {log.nutrients.calories} kcal • {log.nutrients.protein}g protein
-                            </p>
+                      {logs.slice(0, 10).map(log => {
+                        const logDate = new Date(log.timestamp).toDateString();
+                        const isToday = logDate === new Date().toDateString();
+                        return (
+                          <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10 hover:border-brand-olive/20 transition-colors group">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-brand-olive/5 flex items-center justify-center text-brand-olive shrink-0">
+                                <Utensils size={16} />
+                              </div>
+                              <div>
+                                <p className="font-semibold text-sm text-brand-ink">{log.foodName}</p>
+                                <p className="text-[10px] text-brand-clay uppercase font-bold tracking-wider mt-0.5">
+                                  {Math.round(log.nutrients.calories)} kcal • {Math.round(log.nutrients.protein)}g protein
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4 text-right">
+                              <div className="flex flex-col items-end">
+                                <span className="text-[10px] text-brand-clay font-medium">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                {!isToday && (
+                                  <span className="text-[8px] text-brand-clay/60 uppercase font-bold tracking-tighter">
+                                    {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                  </span>
+                                )}
+                              </div>
+                              <button 
+                                onClick={() => handleDeleteLog(log.id)}
+                                className="p-2 text-brand-clay/40 hover:text-red-500 hover:bg-red-50 rounded-full transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                                title="Delete log"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </div>
-                          <span className="text-[10px] text-brand-clay font-medium">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        );
+                      })}
+                      {logs.length === 0 && (
+                        <div className="text-center py-6">
+                           <p className="text-xs text-brand-clay italic opacity-60">No food logged yet.</p>
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
 
@@ -900,8 +983,8 @@ export default function App() {
               <div className="pt-2">
                 <h3 className="serif text-xl font-medium mb-4 text-brand-olive">Recent History</h3>
                 <div className="space-y-3">
-                  {exerciseLogs.slice().reverse().slice(0, 5).map(log => (
-                    <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10">
+                  {exerciseLogs.slice().reverse().slice(0, 10).map(log => (
+                    <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10 group">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-brand-olive/5 rounded-lg">
                           <Dumbbell size={14} className="text-brand-olive" />
@@ -911,8 +994,14 @@ export default function App() {
                           <p className="text-[10px] text-brand-clay uppercase tracking-widest">{new Date(log.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="flex items-center gap-3">
                         <span className="text-[10px] bg-brand-olive/10 text-brand-olive px-2 py-1 rounded-md font-bold">COMPLETED</span>
+                        <button 
+                          onClick={() => handleDeleteExercise(log.id)}
+                          className="p-2 text-brand-clay/40 hover:text-red-500 hover:bg-red-50 rounded-full transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1062,18 +1151,26 @@ export default function App() {
                     <h3 className="serif text-xl font-medium mb-4 text-brand-olive">Report History</h3>
                     <div className="space-y-3">
                       {inBodyReports.map(report => (
-                        <div key={report.id} className="bg-brand-white border border-brand-clay/10 p-5 rounded-3xl flex items-center justify-between">
+                        <div key={report.id} className="bg-brand-white border border-brand-clay/10 p-5 rounded-3xl flex items-center justify-between group">
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 rounded-xl bg-brand-bg flex items-center justify-center">
                               <Scale size={18} className="text-brand-olive" />
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-brand-ink">{new Date(report.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                              <p className="text-[10px] text-brand-clay font-bold uppercase tracking-widest">{report.weight}kg • {report.pbf}% Fat</p>
+                               <p className="text-sm font-bold text-brand-ink">{new Date(report.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                               <p className="text-[10px] text-brand-clay font-bold uppercase tracking-widest">{report.weight}kg • {report.pbf}% Fat</p>
                             </div>
                           </div>
-                          <div className="text-right">
-                             <div className="text-xs font-bold text-brand-olive">{report.smm}kg Muscle</div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                               <div className="text-xs font-bold text-brand-olive">{report.smm}kg Muscle</div>
+                            </div>
+                            <button 
+                              onClick={() => handleDeleteReport(report.id)}
+                              className="p-2 text-brand-clay/40 hover:text-red-500 hover:bg-red-50 rounded-full transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
                         </div>
                       ))}
