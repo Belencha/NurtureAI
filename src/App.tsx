@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, 
@@ -15,6 +17,7 @@ import {
   Trash2,
   Dumbbell,
   CheckCircle2,
+  AlertCircle,
   Scale,
   Palette,
   LogOut,
@@ -22,6 +25,7 @@ import {
 } from 'lucide-react';
 import { analyzeDietPDF, analyzeFood, getNutritionAdvice, analyzeInBodyPDF } from './services/geminiService';
 import { Diet, FoodLog, DailySummary, ExerciseLog, InBodyReport } from './types';
+import { calculateDailyStats, calculateMonthlyStats, getMonthProgress } from './lib/nutrition';
 import { useAuth } from './contexts/AuthContext';
 import { 
   logout, 
@@ -69,6 +73,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dash' | 'log' | 'advice' | 'diet' | 'exercise' | 'metrics'>('dash');
   const [selectedDietId, setSelectedDietId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDietExpanded, setIsDietExpanded] = useState(false);
   const [isAnalyzingPDF, setIsAnalyzingPDF] = useState(false);
   const [advice, setAdvice] = useState<string>("");
   const [theme, setTheme] = useState(() => localStorage.getItem('nurture_theme') || 'organic');
@@ -140,67 +145,23 @@ export default function App() {
   };
 
   const currentDiet = diets.find(d => d.id === selectedDietId) || 
-    [...diets].sort(dietSortFn)[0];
+    [...diets].sort(dietSortFn)[0] || null;
 
   const sortedDiets = [...diets].sort(dietSortFn);
 
-  const getTodayStats = () => {
-    const today = new Date().toDateString();
-    const stats = logs.reduce((acc, log) => {
-      const logDate = log.timestamp ? new Date(log.timestamp).toDateString() : null;
-      if (logDate === today) {
-        return {
-          protein: acc.protein + (Number(log.nutrients?.protein) || 0),
-          carbs: acc.carbs + (Number(log.nutrients?.carbs) || 0),
-          fat: acc.fat + (Number(log.nutrients?.fat) || 0),
-          calories: acc.calories + (Number(log.nutrients?.calories) || 0),
-        };
-      }
-      return acc;
-    }, { protein: 0, carbs: 0, fat: 0, calories: 0 });
+  const [importStatus, setImportStatus] = useState<{ type: 'error' | 'success', message: string } | null>(null);
 
-    return {
-      protein: Math.round(stats.protein),
-      carbs: Math.round(stats.carbs),
-      fat: Math.round(stats.fat),
-      calories: Math.round(stats.calories),
-    };
-  };
+  useEffect(() => {
+    if (importStatus) {
+      const timer = setTimeout(() => setImportStatus(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [importStatus]);
 
-  const todayStats = getTodayStats();
-
-  const getMonthProgress = () => {
-    const now = new Date();
-    const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const elapsedDays = now.getDate();
-    return { elapsedDays, totalDays, percentage: (elapsedDays / totalDays) * 100 };
-  };
-
-  const getMonthStats = () => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    
-    const stats = logs.reduce((acc, log) => {
-      if (!log.timestamp) return acc;
-      const d = new Date(log.timestamp);
-      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-        return {
-          protein: acc.protein + (Number(log.nutrients?.protein) || 0),
-          calories: acc.calories + (Number(log.nutrients?.calories) || 0),
-        };
-      }
-      return acc;
-    }, { protein: 0, calories: 0 });
-
-    return {
-      protein: Math.round(stats.protein),
-      calories: Math.round(stats.calories),
-    };
-  };
+  const todayStats = calculateDailyStats(logs);
 
   const monthProgress = getMonthProgress();
-  const monthStats = getMonthStats();
+  const monthStats = calculateMonthlyStats(logs, new Date().getMonth(), new Date().getFullYear());
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -217,23 +178,34 @@ export default function App() {
           
           const newDiet: Diet = {
             id: Math.random().toString(36).substr(2, 9),
-            month: result.monthName || new Date().toLocaleString('default', { month: 'long' }),
+            month: result.monthName || new Date().toLocaleString('en-US', { month: 'long' }),
             year: result.year || new Date().getFullYear(),
             monthIndex: result.monthIndex !== undefined ? result.monthIndex : new Date().getMonth(),
             extractedPlan: result.summary,
-            nutritionalGoals: result.targets,
+            nutritionalGoals: {
+              protein: Math.round(result.targets?.protein || 0),
+              carbs: Math.round(result.targets?.carbs || 0),
+              fat: Math.round(result.targets?.fat || 0),
+              calories: Math.round(result.targets?.calories || 0),
+            },
             createdAt: Date.now()
           };
 
           if (user) {
             await saveDiet(user.uid, newDiet);
             setSelectedDietId(newDiet.id);
+            setImportStatus({ type: 'success', message: 'Diet imported successfully!' });
           }
         } catch (err) {
           console.error(err);
+          setImportStatus({ type: 'error', message: 'Error analyzing PDF. Please try again.' });
         } finally {
           setIsAnalyzingPDF(false);
         }
+      };
+      reader.onerror = () => {
+        setImportStatus({ type: 'error', message: 'Error reading file.' });
+        setIsAnalyzingPDF(false);
       };
       reader.readAsDataURL(file);
     } catch (err) {
@@ -558,17 +530,17 @@ export default function App() {
                           <div className="text-4xl font-semibold serif text-brand-olive">{todayStats.calories} <span className="text-base font-normal opacity-40">kcal</span></div>
                         </div>
                         <span className="text-[10px] bg-brand-bg text-brand-olive px-3 py-1 rounded-full font-bold uppercase tracking-wider border border-brand-olive/5">
-                          {currentDiet.month}
+                          {currentDiet?.month}
                         </span>
                       </div>
-                      <ProgressBar current={todayStats.calories} target={currentDiet.nutritionalGoals.calories} />
+                      <ProgressBar current={todayStats.calories} target={currentDiet?.nutritionalGoals.calories || 2000} />
                       <div className="flex justify-between mt-3">
                         <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">
-                          {currentDiet.nutritionalGoals.calories > 0 
-                            ? Math.round((todayStats.calories/currentDiet.nutritionalGoals.calories)*100) 
+                          {currentDiet && currentDiet.nutritionalGoals.calories > 0 
+                            ? Math.round((todayStats.calories / currentDiet.nutritionalGoals.calories) * 100) 
                             : 0}% of target
                         </p>
-                        <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">Goal: {currentDiet.nutritionalGoals.calories}</p>
+                        <p className="text-[10px] text-brand-clay font-medium uppercase tracking-wider">Goal: {currentDiet?.nutritionalGoals.calories || 0}</p>
                       </div>
                     </Card>
 
@@ -576,17 +548,17 @@ export default function App() {
                       <div className="flex flex-col h-full">
                         <span className="text-[10px] text-brand-clay uppercase font-bold tracking-widest mb-3">Protein</span>
                         <div className="text-2xl font-semibold serif text-brand-olive mb-4">{todayStats.protein}g</div>
-                        <ProgressBar current={todayStats.protein} target={currentDiet.nutritionalGoals.protein} color="bg-brand-clay" />
-                         <span className="text-[10px] mt-3 text-brand-clay/60 block">{currentDiet.nutritionalGoals.protein}g target</span>
+                        <ProgressBar current={todayStats.protein} target={currentDiet?.nutritionalGoals.protein || 150} color="bg-brand-clay" />
+                         <span className="text-[10px] mt-3 text-brand-clay/60 block">{currentDiet?.nutritionalGoals.protein || 0}g target</span>
                       </div>
                     </Card>
 
                     <Card>
                       <div className="flex flex-col h-full">
-                        <span className="text-[10px] text-brand-clay uppercase font-bold tracking-widest mb-3">Carbs</span>
+                        <span className="text-[10px] text-brand-clay uppercase font-bold tracking-widest mb-3">Carbohydrates</span>
                         <div className="text-2xl font-semibold serif text-brand-sand mb-4">{todayStats.carbs}g</div>
-                        <ProgressBar current={todayStats.carbs} target={currentDiet.nutritionalGoals.carbs} color="bg-brand-sand" />
-                        <span className="text-[10px] mt-3 text-brand-clay/60 block">{currentDiet.nutritionalGoals.carbs}g target</span>
+                        <ProgressBar current={todayStats.carbs} target={currentDiet?.nutritionalGoals.carbs || 200} color="bg-brand-sand" />
+                        <span className="text-[10px] mt-3 text-brand-clay/60 block">{currentDiet?.nutritionalGoals.carbs || 0}g target</span>
                       </div>
                     </Card>
                   </div>
@@ -609,12 +581,12 @@ export default function App() {
                       <div>
                         <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest mb-2">
                           <span className="opacity-60">Protein Accumulation</span>
-                          <span className="text-brand-sand">{Math.round(monthStats.protein)} / {Math.round(currentDiet.nutritionalGoals.protein * monthProgress.totalDays)}g</span>
+                          <span className="text-brand-sand">{Math.round(monthStats.protein)} / {Math.round((currentDiet?.nutritionalGoals?.protein || 150) * monthProgress.totalDays)}g</span>
                         </div>
                         <div className="h-1.5 w-full bg-brand-white/10 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (monthStats.protein / (currentDiet.nutritionalGoals.protein * monthProgress.totalDays)) * 100)}%` }}
+                            animate={{ width: `${Math.min(100, (monthStats.protein / ((currentDiet?.nutritionalGoals?.protein || 150) * monthProgress.totalDays)) * 100)}%` }}
                             className="h-full bg-brand-sand"
                           />
                         </div>
@@ -623,19 +595,19 @@ export default function App() {
                       <div>
                         <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest mb-2">
                           <span className="opacity-60">Energy Consumed</span>
-                          <span className="text-brand-sand">{Math.round(monthStats.calories / 1000)}k / {Math.round((currentDiet.nutritionalGoals.calories * monthProgress.totalDays) / 1000)}k kcal</span>
+                          <span className="text-brand-sand">{Math.round(monthStats.calories / 1000)}k / {Math.round(((currentDiet?.nutritionalGoals?.calories || 2000) * monthProgress.totalDays) / 1000)}k kcal</span>
                         </div>
                         <div className="h-1.5 w-full bg-brand-white/10 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (monthStats.calories / (currentDiet.nutritionalGoals.calories * monthProgress.totalDays)) * 100)}%` }}
+                            animate={{ width: `${Math.min(100, (monthStats.calories / ((currentDiet?.nutritionalGoals?.calories || 2000) * monthProgress.totalDays)) * 100)}%` }}
                             className="h-full bg-brand-white/40"
                           />
                         </div>
                       </div>
 
                       <p className="text-[9px] text-brand-bg/40 leading-tight italic pt-2">
-                        This projection tracks your actual logs against the full monthly budget from your Dr's {currentDiet.month} plan.
+                        This projection tracks your actual logs against the full monthly budget from your plan for {currentDiet?.month || 'diet'}.
                       </p>
                     </div>
                   </Card>
@@ -689,55 +661,6 @@ export default function App() {
                       </div>
                     </div>
                   </Card>
-
-                  <div className="pt-2">
-                    <h3 className="serif text-xl font-medium mb-4 text-brand-olive flex items-center gap-2">
-                       Recent Logs
-                    </h3>
-                    <div className="space-y-3">
-                      {logs.slice(0, 10).map(log => {
-                        const logDate = new Date(log.timestamp).toDateString();
-                        const isToday = logDate === new Date().toDateString();
-                        return (
-                          <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10 hover:border-brand-olive/20 transition-colors group">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-brand-olive/5 flex items-center justify-center text-brand-olive shrink-0">
-                                <Utensils size={16} />
-                              </div>
-                              <div>
-                                <p className="font-semibold text-sm text-brand-ink">{log.foodName}</p>
-                                <p className="text-[10px] text-brand-clay uppercase font-bold tracking-wider mt-0.5">
-                                  {Math.round(log.nutrients.calories)} kcal • {Math.round(log.nutrients.protein)}g protein
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 text-right">
-                              <div className="flex flex-col items-end">
-                                <span className="text-[10px] text-brand-clay font-medium">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                {!isToday && (
-                                  <span className="text-[8px] text-brand-clay/60 uppercase font-bold tracking-tighter">
-                                    {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                                  </span>
-                                )}
-                              </div>
-                              <button 
-                                onClick={() => handleDeleteLog(log.id)}
-                                className="p-2 text-brand-clay/40 hover:text-red-500 hover:bg-red-50 rounded-full transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
-                                title="Delete log"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {logs.length === 0 && (
-                        <div className="text-center py-6">
-                           <p className="text-xs text-brand-clay italic opacity-60">No food logged yet.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
 
                   <div className="pt-8 pb-12">
                     <h4 className="serif text-lg mb-4 text-brand-olive flex items-center gap-2">
@@ -834,7 +757,57 @@ export default function App() {
                   </div>
                 </form>
               </Card>
-              <div className="flex items-center gap-3 justify-center px-8">
+
+              <div className="pt-8">
+                <h3 className="serif text-xl font-medium mb-4 text-brand-olive flex items-center gap-2">
+                   Recent Logs
+                </h3>
+                <div className="space-y-3">
+                  {logs.slice(0, 10).map(log => {
+                    const logDate = new Date(log.timestamp).toDateString();
+                    const isToday = logDate === new Date().toDateString();
+                    return (
+                      <div key={log.id} className="flex items-center justify-between p-4 bg-brand-white rounded-2xl border border-brand-clay/10 hover:border-brand-olive/20 transition-colors group">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-brand-olive/5 flex items-center justify-center text-brand-olive shrink-0">
+                            <Utensils size={16} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm text-brand-ink">{log.foodName}</p>
+                            <p className="text-[10px] text-brand-clay uppercase font-bold tracking-wider mt-0.5">
+                              {Math.round(log.nutrients.calories)} kcal • {Math.round(log.nutrients.protein)}g protein
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-right">
+                          <div className="flex flex-col items-end">
+                            <span className="text-[10px] text-brand-clay font-medium">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            {!isToday && (
+                              <span className="text-[8px] text-brand-clay/60 uppercase font-bold tracking-tighter">
+                                {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                          </div>
+                          <button 
+                            onClick={() => handleDeleteLog(log.id)}
+                            className="p-2 text-brand-clay/40 hover:text-red-500 hover:bg-red-50 rounded-full transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                            title="Delete log"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {logs.length === 0 && (
+                    <div className="text-center py-6">
+                       <p className="text-xs text-brand-clay italic opacity-60">No food logged yet.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 justify-center px-8 mt-10">
                  <div className="h-[1px] flex-1 bg-brand-clay/10" />
                  <p className="text-[10px] font-bold text-brand-clay uppercase tracking-widest">AI Extraction Engine</p>
                  <div className="h-[1px] flex-1 bg-brand-clay/10" />
@@ -850,53 +823,57 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="space-y-6 pt-4"
             >
-              <h2 className="serif text-3xl font-medium text-brand-olive">AI Insight</h2>
-              <div className="bg-brand-olive/5 border-l-4 border-brand-olive p-6 rounded-r-3xl rounded-bl-3xl">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-brand-olive block mb-2">Nutritionist AI</span>
-                <div className="text-sm text-brand-ink leading-relaxed italic prose-sm">
-                  {advice ? advice : "I'm monitoring your Dr. plan. Ask me about substitutions or how to satisfy your macro targets for today."}
-                  {isLoading && <span className="block mt-4 animate-pulse font-sans font-bold uppercase text-[10px] tracking-widest">Consulting knowledge base...</span>}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-[10px] font-bold text-brand-clay uppercase tracking-widest mb-2 px-2">Common Inquiries</p>
-                <button 
-                  onClick={() => handleGetAdvice("I haven't eaten enough protein today. Suggest something for dinner.")}
-                  className="w-full text-left p-4 bg-brand-white rounded-2xl text-xs font-semibold text-brand-olive border border-brand-clay/10 hover:bg-brand-olive hover:text-brand-white transition-all group"
-                >
-                  "I need more protein, what should I eat?"
-                </button>
-                <button 
-                  onClick={() => handleGetAdvice("I want to skip lunch and have a double dinner. Does that work with my plan?")}
-                  className="w-full text-left p-4 bg-brand-white rounded-2xl text-xs font-semibold text-brand-olive border border-brand-clay/10 hover:bg-brand-olive hover:text-brand-white transition-all group"
-                >
-                  "Can I modify my diet for today?"
-                </button>
-                
-                <div className="pt-6">
-                  <div className="flex gap-2 p-2 bg-brand-white rounded-3xl border border-brand-clay/20 shadow-sm focus-within:border-brand-olive transition-colors">
-                    <input 
-                      type="text" 
-                      placeholder="Ask the AI Advisor..."
-                      className="flex-1 px-4 bg-transparent border-none text-sm outline-none placeholder:text-brand-clay/50 font-medium"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleGetAdvice(e.currentTarget.value);
-                      }}
-                    />
-                    <button 
-                      onClick={(e) => {
-                         const input = e.currentTarget.previousElementSibling as HTMLInputElement;
-                         handleGetAdvice(input.value);
-                      }}
-                      className="p-3 bg-brand-olive text-brand-white rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-brand-olive/20"
-                    >
-                      <ArrowRight size={20} />
-                    </button>
+                <h2 className="serif text-3xl font-medium text-brand-olive">AI Insight</h2>
+                <div className="bg-brand-olive/5 border-l-4 border-brand-olive p-6 rounded-r-3xl rounded-bl-3xl">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-olive block mb-2">AI Nutritionist</span>
+                  <div className="text-sm text-brand-ink leading-relaxed italic prose-sm markdown-content">
+                    {advice ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{advice}</ReactMarkdown>
+                    ) : (
+                      "I'm monitoring your plan. Ask me about substitutions or how to meet your macro goals for today."
+                    )}
+                    {isLoading && <span className="block mt-4 animate-pulse font-sans font-bold uppercase text-[10px] tracking-widest">Consulting knowledge base...</span>}
                   </div>
                 </div>
-              </div>
-            </motion.div>
+
+                <div className="space-y-3">
+                  <p className="text-[10px] font-bold text-brand-clay uppercase tracking-widest mb-2 px-2">Common Queries</p>
+                  <button 
+                    onClick={() => handleGetAdvice("I haven't eaten enough protein today. Suggest something for dinner.")}
+                    className="w-full text-left p-4 bg-brand-white rounded-2xl text-xs font-semibold text-brand-olive border border-brand-clay/10 hover:bg-brand-olive hover:text-brand-white transition-all group"
+                  >
+                    "I need more protein, what should I eat?"
+                  </button>
+                  <button 
+                    onClick={() => handleGetAdvice("I want to skip lunch and have a double dinner. Does that work with my plan?")}
+                    className="w-full text-left p-4 bg-brand-white rounded-2xl text-xs font-semibold text-brand-olive border border-brand-clay/10 hover:bg-brand-olive hover:text-brand-white transition-all group"
+                  >
+                    "Can I modify my diet for today?"
+                  </button>
+                  
+                  <div className="pt-6">
+                    <div className="flex gap-2 p-2 bg-brand-white rounded-3xl border border-brand-clay/20 shadow-sm focus-within:border-brand-olive transition-colors">
+                      <input 
+                        type="text" 
+                        placeholder="Ask the AI advisor..."
+                        className="flex-1 px-4 bg-transparent border-none text-sm outline-none placeholder:text-brand-clay/50 font-medium"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleGetAdvice(e.currentTarget.value);
+                        }}
+                      />
+                      <button 
+                        onClick={(e) => {
+                           const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                           handleGetAdvice(input.value);
+                        }}
+                        className="p-3 bg-brand-olive text-brand-white rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-brand-olive/20"
+                      >
+                        <ArrowRight size={20} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
           )}
 
           {activeTab === 'exercise' && (
@@ -1216,18 +1193,27 @@ export default function App() {
                       <div className="absolute top-0 right-0 px-3 py-1 bg-brand-olive text-brand-white text-[8px] font-bold uppercase tracking-[0.2em] rounded-bl-xl">
                         Selected Plan
                       </div>
-                      <div className="flex items-start gap-4 mb-6">
-                        <div className="w-12 h-12 rounded-xl bg-brand-sand flex items-center justify-center text-brand-white font-bold text-xs font-sans">
-                          PDF
+                      <div className="flex justify-between items-start mb-6">
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-brand-sand flex items-center justify-center text-brand-white font-bold text-xs font-sans">
+                            PDF
+                          </div>
+                          <div>
+                            <p className="font-bold serif text-lg text-brand-olive">Plan for {currentDiet.month} {currentDiet.year}</p>
+                            <p className="text-[9px] text-brand-clay font-bold uppercase tracking-widest mt-0.5">Goal: {Math.round(currentDiet.nutritionalGoals.calories)} kcal</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold serif text-lg text-brand-olive">{currentDiet.month} {currentDiet.year} Plan</p>
-                          <p className="text-[9px] text-brand-clay font-bold uppercase tracking-widest mt-0.5">Primary Target: {currentDiet.nutritionalGoals.calories} kcal</p>
-                        </div>
+                        <button 
+                          onClick={() => setIsDietExpanded(true)}
+                          className="p-2 bg-brand-bg rounded-lg text-brand-olive hover:bg-brand-olive hover:text-brand-white transition-all shadow-sm"
+                          title="Expand plan"
+                        >
+                          <Plus size={16} />
+                        </button>
                       </div>
-                      <div className="space-y-4">
-                        <div className="text-xs text-brand-ink leading-relaxed prose-sm opacity-80 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                          {currentDiet.extractedPlan}
+            <div className="space-y-4">
+                        <div className="text-xs text-brand-ink leading-relaxed opacity-80 max-h-48 overflow-y-auto pr-2 custom-scrollbar markdown-content">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentDiet.extractedPlan}</ReactMarkdown>
                         </div>
                         <div className="grid grid-cols-3 gap-2 pt-4 border-t border-brand-clay/10">
                           <div className="text-center">
@@ -1304,12 +1290,59 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>      {/* Bottom Nav */}
+      <AnimatePresence>
+        {isDietExpanded && currentDiet && (
+          <motion.div 
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            className="fixed inset-0 z-[60] bg-brand-bg flex flex-col pt-12"
+          >
+              <div className="px-6 pb-4 border-b border-brand-clay/10 flex justify-between items-center">
+              <div>
+                <h2 className="serif text-2xl text-brand-olive">{currentDiet.month} {currentDiet.year} Plan</h2>
+                <p className="text-[10px] text-brand-clay font-bold uppercase tracking-widest">Full Clinical Guide</p>
+              </div>
+              <button 
+                onClick={() => setIsDietExpanded(false)}
+                className="p-2 bg-brand-olive text-brand-white rounded-full transition-all"
+              >
+                <Plus size={20} className="rotate-45" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-10 custom-scrollbar">
+              <div className="markdown-content max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentDiet.extractedPlan}</ReactMarkdown>
+              </div>
+              
+              <div className="h-40" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Status Notifications */}
+      <AnimatePresence>
+        {importStatus && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-6 right-6 z-[70] pointer-events-none flex justify-center"
+          >
+            <div className={`px-6 py-3 rounded-2xl shadow-xl text-white font-bold text-xs uppercase tracking-widest flex items-center gap-3 ${importStatus.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+              {importStatus.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+              {importStatus.message}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-brand-white/95 backdrop-blur-xl border-t border-brand-clay/10 px-4 py-6 flex justify-between items-center z-20">
         <NavButton active={activeTab === 'dash'} onClick={() => setActiveTab('dash')} icon={<TrendingUp size={18} />} label="Stats" />
-        <NavButton active={activeTab === 'exercise'} onClick={() => setActiveTab('exercise')} icon={<Calendar size={18} />} label="Activity" />
-        <NavButton active={activeTab === 'metrics'} onClick={() => setActiveTab('metrics')} icon={<Scale size={18} />} label="Body" />
         <NavButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} icon={<Utensils size={18} />} label="Log" />
-        <NavButton active={activeTab === 'advice'} onClick={() => setActiveTab('advice')} icon={<ChefHat size={18} />} label="Advice" />
+        <NavButton active={activeTab === 'exercise'} onClick={() => setActiveTab('exercise')} icon={<Calendar size={18} />} label="Crossfit" />
+        <NavButton active={activeTab === 'metrics'} onClick={() => setActiveTab('metrics')} icon={<Scale size={18} />} label="Body" />
+        <NavButton active={activeTab === 'advice'} onClick={() => setActiveTab('advice')} icon={<ChefHat size={18} />} label="AI Advisor" />
         <NavButton active={activeTab === 'diet'} onClick={() => setActiveTab('diet')} icon={<FileText size={18} />} label="Plan" />
       </nav>
     </div>

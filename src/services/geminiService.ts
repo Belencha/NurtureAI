@@ -4,6 +4,9 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export async function analyzeDietPDF(base64Data: string, fileName?: string) {
   const model = "gemini-2.0-flash";
+  // WARNING: DO NOT MODIFY THE FOLLOWING PROMPT. 
+  // It has been optimized for high-fidelity literal transcription of clinical diet PDFs.
+  // Changes to these instructions may result in loss of detail or incorrect table formatting.
   const prompt = `
     Analyze this nutrition diet PDF comprehensively. 
     1. Extract or ESTIMATE the primary daily nutritional targets:
@@ -17,17 +20,30 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
     listed in the meal plan (e.g. sum up the protein in the eggs, chicken, and yogurt mentioned). 
     NEVER return 0 for these values unless the diet is a total fast.
     
-    2. Provide a detailed summary of the eating plan, including specific meal-by-meal rules.
+    2. Provide a FULL, LITERAL TRANSCRIPTION of the eating plan. 
+       - DO NOT SUMMARIZE, DO NOT SHORTEN, DO NOT TRUNCATE. 
+       - Capture 100% of the meals, ALL options (Option 1, Option 2, etc.), ALL ingredients, and ALL quantities/portions.
+       - If there are notes, general rules, or dietary guidelines, include them verbatim.
+       - Use Markdown TABLES for every meal schedule. 
+       - Use columns like "Meal/Time" and "Food, Description & Quantities".
+       - Keep the portion/quantity in the same cell as the food item.
+       - The goal is for the user to see EVERYTHING that was in the PDF, but in a clean digital table format.
+       - If a section cannot be easily put into a table, transcribe it as formatted Markdown text.
     3. Determine the intended MONTH and YEAR of this diet plan. 
        Look for dates within the PDF text or headers. 
        Filename provided for context: "${fileName || "unknown"}".
        IMPORTANT: If no specific year is found in the PDF, use the CURRENT YEAR (2026).
        Extract:
-       - monthName: (e.g. "January")
+       - monthName: (e.g. "January" or "Enero" depending on source language)
        - monthIndex: (0-11)
        - year: (number, e.g. 2026)
+      
+    IMPORTANT FOR TARGETS:
+    - Use these EXACT keys in English for the targets object: "protein", "carbs", "fat", "calories".
+    - Return targets as WHOLE NUMBERS (integers). No decimals.
+    - If a target is missing, ESTIMATE it based on the plan. NEVER return 0.
     
-    Return the response as a clear JSON object.
+    Return the response as a JSON object following the schema. Text content (fullPlanMarkdown, monthName) must match the source PDF language.
   `;
 
   const response = await ai.models.generateContent({
@@ -45,7 +61,7 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          summary: { type: Type.STRING },
+          fullPlanMarkdown: { type: Type.STRING },
           monthName: { type: Type.STRING },
           monthIndex: { type: Type.NUMBER },
           year: { type: Type.NUMBER },
@@ -59,12 +75,18 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
             }
           }
         },
-        required: ["summary", "targets", "monthName", "monthIndex", "year"]
+        required: ["fullPlanMarkdown", "targets", "monthName", "monthIndex", "year"]
       }
     }
   });
 
-  return JSON.parse(response.text);
+  const text = response.text;
+  const parsed = JSON.parse(text);
+  
+  return {
+    summary: parsed.fullPlanMarkdown, // Keep internal mapping for backward compatibility in the service interface if needed, or just return the object
+    ...parsed
+  };
 }
 
 export async function analyzeInBodyPDF(base64Data: string) {
@@ -169,6 +191,8 @@ export async function getNutritionAdvice(
     
     Based on the diet plan and today's intake, suggest a healthy adaptation or food to fulfill the missing nutrients.
     If the user modified the diet, let them know if it's a good adaptation or how to balance it.
+    
+    IMPORTANT: Respond in the SAME LANGUAGE as the Diet Plan Context (e.g., if the plan is in Spanish, respond in Spanish; if it's in English, respond in English). Use a helpful, encouraging tone.
   `;
 
   const response = await ai.models.generateContent({
