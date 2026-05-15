@@ -29,7 +29,17 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
        - Keep the portion/quantity in the same cell as the food item.
        - The goal is for the user to see EVERYTHING that was in the PDF, but in a clean digital table format.
        - If a section cannot be easily put into a table, transcribe it as formatted Markdown text.
-    3. Determine the intended MONTH and YEAR of this diet plan. 
+    
+    3. Identify and Extract SELECTABLE MEAL OPTIONS:
+       - Go through the meal plan and identify every distinct, loggable meal choice.
+       - Create a list of "selectableOptions".
+       - For each option, provide:
+          - category: (e.g. "Breakfast", "Snack", "Lunch", "Dinner")
+          - foodName: (A short, concise name for the meal, e.g. "Greek Yogurt with Berries")
+          - description: (A literal transcription of the full meal description and quantity)
+          - nutrients: (ESTIMATE the protein, carbs, fat, and calories for THIS SPECIFIC MEAL OPTION)
+    
+    4. Determine the intended MONTH and YEAR of this diet plan. 
        Look for dates within the PDF text or headers. 
        Filename provided for context: "${fileName || "unknown"}".
        IMPORTANT: If no specific year is found in the PDF, use the CURRENT YEAR (2026).
@@ -73,6 +83,28 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
               fat: { type: Type.NUMBER },
               calories: { type: Type.NUMBER }
             }
+          },
+          selectableOptions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                category: { type: Type.STRING },
+                foodName: { type: Type.STRING },
+                description: { type: Type.STRING },
+                nutrients: {
+                  type: Type.OBJECT,
+                  properties: {
+                    protein: { type: Type.NUMBER },
+                    carbs: { type: Type.NUMBER },
+                    fat: { type: Type.NUMBER },
+                    calories: { type: Type.NUMBER }
+                  }
+                }
+              },
+              required: ["category", "foodName", "description", "nutrients"]
+            }
           }
         },
         required: ["fullPlanMarkdown", "targets", "monthName", "monthIndex", "year"]
@@ -83,9 +115,16 @@ export async function analyzeDietPDF(base64Data: string, fileName?: string) {
   const text = response.text;
   const parsed = JSON.parse(text);
   
+  // Add IDs to selectable options if missing
+  const selectableOptions = (parsed.selectableOptions || []).map((opt: any, index: number) => ({
+    ...opt,
+    id: opt.id || `opt-${Date.now()}-${index}`
+  }));
+
   return {
-    summary: parsed.fullPlanMarkdown, // Keep internal mapping for backward compatibility in the service interface if needed, or just return the object
-    ...parsed
+    summary: parsed.fullPlanMarkdown,
+    ...parsed,
+    selectableOptions
   };
 }
 

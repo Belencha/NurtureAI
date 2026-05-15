@@ -1,9 +1,23 @@
+export interface SelectableOption {
+  id: string;
+  category: string; // e.g. "Breakfast", "Lunch"
+  foodName: string;
+  description: string;
+  nutrients: {
+    protein: number;
+    carbs: number;
+    fat: number;
+    calories: number;
+  };
+}
+
 export interface Diet {
   id: string;
   month: string;
   year: number;
   monthIndex: number; // 0-11
   extractedPlan: string; // The text content extracted from PDF
+  selectableOptions?: SelectableOption[]; // Structured list of meal options to pick from
   nutritionalGoals: {
     protein: number;
     carbs: number;

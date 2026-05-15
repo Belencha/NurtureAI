@@ -77,6 +77,7 @@ export default function App() {
   const [isAnalyzingPDF, setIsAnalyzingPDF] = useState(false);
   const [advice, setAdvice] = useState<string>("");
   const [theme, setTheme] = useState(() => localStorage.getItem('nurture_theme') || 'organic');
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -182,6 +183,7 @@ export default function App() {
             year: result.year || new Date().getFullYear(),
             monthIndex: result.monthIndex !== undefined ? result.monthIndex : new Date().getMonth(),
             extractedPlan: result.summary,
+            selectableOptions: result.selectableOptions,
             nutritionalGoals: {
               protein: Math.round(result.targets?.protein || 0),
               carbs: Math.round(result.targets?.carbs || 0),
@@ -401,7 +403,7 @@ export default function App() {
     return { category, desc, nextStep, tips, pbfRange, targets };
   };
 
-  const getExerciseTendency = () => {
+  const exerciseStats = (() => {
     const now = new Date();
     const startOfLoggedPeriod = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     
@@ -419,9 +421,26 @@ export default function App() {
     const diff = Math.abs(thisWeek - lastWeek);
 
     return { thisWeek, lastWeek, trend, diff };
-  };
+  })();
 
-  const exerciseStats = getExerciseTendency();
+  const handleLogOption = async (option: any) => {
+    if (!user) return;
+    
+    const newLog: FoodLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: Date.now(),
+      foodName: option.foodName,
+      nutrients: {
+        protein: Math.round(option.nutrients.protein),
+        carbs: Math.round(option.nutrients.carbs),
+        fat: Math.round(option.nutrients.fat),
+        calories: Math.round(option.nutrients.calories)
+      }
+    };
+
+    await saveFoodLog(user.uid, newLog);
+    setActiveTab('dash');
+  };
 
   if (authLoading) {
     return (
@@ -728,6 +747,88 @@ export default function App() {
               className="space-y-6 pt-4"
             >
               <h2 className="serif text-3xl font-medium text-brand-olive">Add Entry</h2>
+              
+              {currentDiet?.selectableOptions && currentDiet.selectableOptions.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-clay">Quick Log from Plan</h3>
+                    {activeCategory && (
+                      <button 
+                        onClick={() => setActiveCategory(null)}
+                        className="text-[9px] font-bold text-brand-olive uppercase tracking-widest"
+                      >
+                        Clear Filter
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Category Pills */}
+                  <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar -mx-1 px-1">
+                    {Array.from(new Set(currentDiet.selectableOptions.map(opt => opt.category))).map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
+                        className={`
+                          px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest whitespace-nowrap border transition-all
+                          ${activeCategory === cat 
+                            ? 'bg-brand-olive text-brand-white border-brand-olive shadow-sm' 
+                            : 'bg-brand-white text-brand-clay border-brand-clay/10 hover:border-brand-clay/30'}
+                        `}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {(activeCategory 
+                      ? currentDiet.selectableOptions.filter(o => o.category === activeCategory)
+                      : currentDiet.selectableOptions.slice(0, 3)
+                    ).map(option => (
+                      <motion.button
+                        layout
+                        key={option.id}
+                        onClick={() => handleLogOption(option)}
+                        className="flex flex-col p-4 bg-brand-white rounded-3xl border border-brand-clay/10 text-left hover:border-brand-olive/30 hover:bg-brand-olive/[0.02] transition-all group"
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[8px] font-bold px-2 py-0.5 bg-brand-bg rounded-full text-brand-clay uppercase tracking-[0.2em]">
+                            {option.category}
+                          </span>
+                          <div className="text-[9px] font-bold text-brand-olive opacity-40 group-hover:opacity-100 transition-opacity">
+                            TAP TO LOG +
+                          </div>
+                        </div>
+                        <p className="font-bold text-sm text-brand-ink mb-1">{option.foodName}</p>
+                        <p className="text-[10px] text-brand-clay/60 leading-tight line-clamp-1 mb-3">{option.description}</p>
+                        <div className="flex gap-4">
+                          <span className="text-[9px] font-bold text-brand-olive uppercase tracking-widest">{option.nutrients.calories} kcal</span>
+                          <span className="text-[9px] font-bold text-brand-clay opacity-40 uppercase tracking-widest">{option.nutrients.protein}g P</span>
+                          <span className="text-[9px] font-bold text-brand-clay opacity-40 uppercase tracking-widest">{option.nutrients.carbs}g C</span>
+                        </div>
+                      </motion.button>
+                    ))}
+                    {!activeCategory && currentDiet.selectableOptions.length > 3 && (
+                      <button 
+                        onClick={() => setActiveCategory(currentDiet.selectableOptions![0].category)}
+                        className="py-3 text-[10px] font-bold text-brand-olive/60 uppercase tracking-[0.2em] hover:text-brand-olive transition-colors"
+                      >
+                        See more options...
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="relative pt-6">
+                 <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div className="w-full border-t border-brand-clay/10"></div>
+                 </div>
+                 <div className="relative flex justify-center text-[10px] font-bold uppercase tracking-widest">
+                    <span className="bg-brand-bg px-4 text-brand-clay/30 italic">or manual entry</span>
+                 </div>
+              </div>
+
               <Card>
                 <form onSubmit={(e) => {
                   e.preventDefault();
